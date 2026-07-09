@@ -1,0 +1,32 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environment (uv)
+.venv/
+
+# Type checking / linting caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Output generated at runtime
+data/output/
+
+# Environment / secrets
+.env
+
+# OS-specific
+.DS_Store
+
+# Editor-specific
+.vscode/
+.idea/
