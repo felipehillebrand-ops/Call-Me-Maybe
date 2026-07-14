@@ -45,7 +45,6 @@ def save_results(results: List[FunctionCallOutput], file_path: Path) -> None:
         results (List[FunctionCallOutput]): Validated results to save.
         file_path (Path): Destination path for the JSON file.
     """
-    # Garante que o diretório data/output exista antes de tentar escrever
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with file_path.open("w", encoding="utf-8") as f:
