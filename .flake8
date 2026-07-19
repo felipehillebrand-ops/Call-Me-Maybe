@@ -3,6 +3,7 @@ exclude =
     .venv,
     .git,
     __pycache__,
+    moulinette,
     llm_sdk,
     data,
     build,
