@@ -124,7 +124,6 @@ help:
 	@echo "    fclean       clean + remove the uv virtual environment"
 	@echo "    lint         Run flake8 + mypy with mandatory flags"
 	@echo "    lint-strict  Run flake8 + mypy with --strict"
-
 	@echo ""
 
 .PHONY: all install run run-verbose run-trace error debug clean fclean lint lint-strict help
