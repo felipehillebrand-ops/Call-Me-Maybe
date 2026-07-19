@@ -36,4 +36,25 @@ def parse_args() -> argparse.Namespace:
         help="Path to the output results JSON file."
     )
 
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Print a live, step-by-step view of the constrained "
+            "decoding process (function/parameter narrowing, chosen "
+            "tokens, stop conditions) as each prompt is processed."
+        )
+    )
+
+    parser.add_argument(
+        "--trace-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to save the full generation trace as JSON, "
+            "for later inspection or visualization. Recorded regardless "
+            "of --verbose; only requires --trace-output to be set."
+        )
+    )
+
     return parser.parse_args()
