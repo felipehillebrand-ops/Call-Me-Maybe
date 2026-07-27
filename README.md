@@ -72,7 +72,7 @@ uv run python -m src \
 | `run`         | Run the tool with the default input/output paths          |
 | `run-verbose` | Run the tool printing a live generation trace (`--verbose`) |
 | `run-trace`   | Run the tool saving the generation trace to `data/output/trace.json` |
-| `error`       | Run the tool forcing simulated failures on prompts #1 and #6 (override with `make error INDEXES=3,7`), to demo error recovery |
+| `error`       | Run the tool forcing simulated failures on specific prompts (override with `make error INDEXES=3,7`), to demo error recovery |
 | `debug`       | Run the tool under Python's `pdb` debugger                 |
 | `clean`       | Remove `__pycache__`, `.mypy_cache`, `.pytest_cache`, etc. |
 | `fclean`      | `clean` + remove the `uv` virtual environment           |
@@ -303,8 +303,7 @@ succeeded (e.g. `8/11 prompt(s) succeeded`).
 Crucially, a failed prompt still gets **an entry in the output list** — a
 placeholder with the original `prompt` and empty `name`/`parameters` —
 instead of being skipped outright. This matters because the output is a
-JSON *array*, and any position-based consumer (including this project's own
-moulinette, which compares `results[i]` against `test_prompts[i]`) relies on
+JSON *array*, and any position-based consumer relies on
 that array staying the same length and order as the input prompts. Silently
 dropping a failed slot would shift every *subsequent* result one position
 to the left, turning one real failure into a cascade of false failures for
@@ -315,11 +314,10 @@ This intentionally does **not** write any extra output file, so the
 program's default output stays exactly the single JSON file required by
 the subject.
 
-To demonstrate this without depending on a naturally-occurring failure, a
-demo-only, opt-in trigger is available: setting the environment variable
-`CALL_ME_MAYBE_DEMO_FAIL_INDEXES` to a comma-separated list of 1-based
-prompt numbers (matching the `Prompt #N` shown in `--verbose` output)
-simulates a failure on exactly those prompts, e.g.:
+To demonstrate this, a demo-only, opt-in trigger is available: setting 
+the environment variable `CALL_ME_MAYBE_DEMO_FAIL_INDEXES` to a 
+comma-separated list of 1-based prompt numbers (matching the `Prompt #N` 
+shown in `--verbose` output) simulates a failure on exactly those prompts, e.g.:
 
 ```sh
 # Simulates a failure on prompts #1 and #6 only
@@ -331,15 +329,6 @@ make error
 # Override which prompts fail:
 make error INDEXES=3,7
 ```
-
-Matching by index rather than by a text substring is intentional: an
-earlier version of this trigger matched by substring (e.g. `"product"`),
-which also accidentally matched unrelated prompts containing that
-substring (e.g. `"production"`), triggering more failures than intended.
-Index-based matching has no such collision risk. The variable is unset by
-default, so it has zero effect on normal runs (including the moulinette) —
-it exists purely to make the recovery mechanism demonstrable on request
-during evaluation.
 
 ## Resources
 
