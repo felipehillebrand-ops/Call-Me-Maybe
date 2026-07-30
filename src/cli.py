@@ -9,10 +9,23 @@ def parse_args() -> argparse.Namespace:
     Parse command line arguments.
 
     Returns:
-        argparse.Namespace: The parsed arguments containing file paths.
+        argparse.Namespace: The parsed arguments containing
+        file paths and model configuration.
     """
     parser = argparse.ArgumentParser(
         description="Function calling tool using constrained decoding."
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Qwen/Qwen3-0.6B",
+        help=(
+            "HuggingFace model ID or local directory path (default: "
+            "'Qwen/Qwen3-0.6B'). "
+            "Allows running constrained decoding with alternative "
+            "language models."
+        )
     )
 
     parser.add_argument(

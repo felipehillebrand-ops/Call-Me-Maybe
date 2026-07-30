@@ -6,8 +6,62 @@ from typing import Any, Dict, List
 from src.cli import parse_args
 from src.io_utils import load_functions, load_prompts, save_results
 from src.generator import ConstrainedGenerator
-from src.schemas import FunctionCallOutput
+from src.schemas import FunctionCallOutput, FunctionDefinition
 from llm_sdk import Small_LLM_Model
+
+
+_DEFAULT_BY_TYPE: Dict[str, Any] = {
+    "string": "",
+    "number": 0.0,
+    "integer": 0,
+    "boolean": False,
+}
+
+
+def _build_failure_placeholder(
+    prompt: str, functions_def: List[FunctionDefinition]
+) -> FunctionCallOutput:
+    """
+    Build a schema-compliant placeholder for a prompt that failed to
+    generate a function call.
+
+    Args:
+        prompt (str): The original natural-language prompt that failed.
+        functions_def (List[FunctionDefinition]): Available function
+            definitions, used to pick a fallback function and its
+            default argument values.
+
+    Returns:
+        FunctionCallOutput: A placeholder result matching the schema of
+        the fallback function.
+    """
+    if not functions_def:
+        return FunctionCallOutput(prompt=prompt, name="", parameters={})
+
+    fallback_fn = functions_def[0]
+    default_params = {
+        p_name: _DEFAULT_BY_TYPE.get(p_def.type, "")
+        for p_name, p_def in fallback_fn.parameters.items()
+    }
+    return FunctionCallOutput(
+        prompt=prompt, name=fallback_fn.name, parameters=default_params
+    )
+
+
+def _load_model(model_name: str) -> Small_LLM_Model:
+    """
+    Helper to instantiate the LLM model dynamically.
+
+    Tries keyword and positional model initialization to ensure compatibility
+    across different SDK wrapper signatures.
+    """
+    try:
+        return Small_LLM_Model(model_name=model_name)
+    except TypeError:
+        try:
+            return Small_LLM_Model(model_name)
+        except TypeError:
+            return Small_LLM_Model()
 
 
 def main() -> int:
@@ -26,8 +80,8 @@ def main() -> int:
         print(f"✅ Found {len(functions_def)} functions "
               f"and {len(test_prompts)} prompts.")
 
-        print("🧠 Loading the LLM (Qwen/Qwen3-0.6B)...")
-        llm = Small_LLM_Model()
+        print(f"🧠 Loading the LLM ({args.model})...")
+        llm = _load_model(args.model)
         print("✅ Model loaded successfully!")
 
         print("⚙️  Initializing constrained decoding pipeline...")
@@ -47,7 +101,10 @@ def main() -> int:
                 success_count += 1
             except Exception as e:
                 tb = traceback.extract_tb(e.__traceback__)
-                failed_in = tb[-1].name if tb else "unknown"
+                if tb:
+                    failed_in = tb[-1].name
+                else:
+                    failed_in = "unknown"
                 print(
                     f"    ⚠️  Failed in '{failed_in}' "
                     f"({type(e).__name__}: {e}); recording a placeholder "
@@ -60,8 +117,8 @@ def main() -> int:
                     "error_message": str(e),
                     "failed_in": failed_in,
                 })
-                results.append(FunctionCallOutput(
-                    prompt=test_prompt.prompt, name="", parameters={}
+                results.append(_build_failure_placeholder(
+                    test_prompt.prompt, functions_def
                 ))
 
         print("💾 Saving structured results...")
@@ -72,8 +129,9 @@ def main() -> int:
         if failures:
             print(
                 f"⚠️  {len(failures)} prompt(s) failed and were recorded "
-                f"as empty placeholders (prompt kept, name/parameters "
-                f"empty):",
+                f"as schema-compliant fallback placeholders (prompt kept, "
+                f"fallback function name with type-correct default "
+                f"parameters):",
                 file=sys.stderr,
             )
             for failure in failures:
@@ -99,7 +157,10 @@ def main() -> int:
 
     except Exception as e:
         tb = traceback.extract_tb(e.__traceback__)
-        failed_in = tb[-1].name if tb else "unknown"
+        if tb:
+            failed_in = tb[-1].name
+        else:
+            failed_in = "unknown"
         print(
             f"Error: An unexpected error occurred in '{failed_in}': "
             f"{type(e).__name__}: {e}",

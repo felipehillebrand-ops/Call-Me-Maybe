@@ -18,7 +18,6 @@ class VocabFilter:
         vocab_size = len(dummy_logits)
 
         self.numeric_tokens: Set[int] = set()
-        self.quote_tokens: Set[int] = set()
         self.all_tokens: Set[int] = set(range(vocab_size))
 
         for token_id in range(vocab_size):
@@ -30,8 +29,6 @@ class VocabFilter:
                 if all(c in "0123456789.- " for c in token_str):
                     self.numeric_tokens.add(token_id)
 
-                if '"' in token_str:
-                    self.quote_tokens.add(token_id)
             except Exception:
                 continue
 
