@@ -2,7 +2,9 @@
 name = "call-me-maybe"
 version = "1.0.0"
 description = "Function calling tool that translates natural language prompts into structured function calls using constrained decoding."
-authors = [{name = "fjose-hi"}]
+authors = [
+    { name = "Felipe Hillebrand", email = "fjose-hi@student.42porto.com" }
+]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,17 +16,12 @@ dependencies = [
 
 [tool.uv.sources]
 llm-sdk = { path = "llm_sdk", editable = true }
-torch = { index = "pytorch-cpu" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
 [dependency-groups]
 dev = [
     "flake8>=7.0",
     "mypy>=1.10",
+    "pytest>=8.0",
 ]
 
 [tool.mypy]
@@ -40,6 +37,10 @@ exclude = "^(llm_sdk|moulinette)/"
 module = ["llm_sdk", "llm_sdk.*"]
 follow_imports = "skip"
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disable_error_code = ["untyped-decorator"]
 
 [build-system]
 requires = ["hatchling"]

@@ -4,9 +4,7 @@ CALLING		= data/input/function_calling_tests.json
 DEFINITION	= data/input/functions_definition.json
 OUTPUT		= data/output/function_calling_results.json
 
-HF_CACHE := $(shell if [ -d /sgoinfre/$(USER) ]; then \
-	echo /sgoinfre/$(USER)/.cache/huggingface; \
-	else echo $$HOME/.cache/huggingface; fi)
+MODEL       ?= Qwen/Qwen3-0.6B
 
 all: install run
 
@@ -25,18 +23,22 @@ install:
  
 run:
 	@echo ">>> Running function calling tool..."
-	@echo ">>> Hugging Face cache: $(HF_CACHE)"
-	@mkdir -p $(HF_CACHE)
-	HF_HOME="$(HF_CACHE)" $(UV) run python -m $(SRC) \
+	$(UV) run python -m $(SRC) \
 		--functions_definition $(DEFINITION) \
 		--input $(CALLING) \
 		--output $(OUTPUT)
 
+run-model:
+	@echo ">>> Running function calling tool with model: $(MODEL)..."
+	$(UV) run python -m $(SRC) \
+		--functions_definition $(DEFINITION) \
+		--input $(CALLING) \
+		--output $(OUTPUT) \
+		--model "$(MODEL)"
+
 run-verbose:
 	@echo ">>> Running function calling tool (verbose generation trace)..."
-	@echo ">>> Hugging Face cache: $(HF_CACHE)"
-	@mkdir -p $(HF_CACHE)
-	HF_HOME="$(HF_CACHE)" $(UV) run python -m $(SRC) \
+	$(UV) run python -m $(SRC) \
 		--functions_definition $(DEFINITION) \
 		--input $(CALLING) \
 		--output $(OUTPUT) \
@@ -44,9 +46,7 @@ run-verbose:
  
 run-trace:
 	@echo ">>> Running function calling tool (saving generation trace to JSON)..."
-	@echo ">>> Hugging Face cache: $(HF_CACHE)"
-	@mkdir -p $(HF_CACHE)
-	HF_HOME="$(HF_CACHE)" $(UV) run python -m $(SRC) \
+	$(UV) run python -m $(SRC) \
 		--functions_definition $(DEFINITION) \
 		--input $(CALLING) \
 		--output $(OUTPUT) \
@@ -57,10 +57,8 @@ INDEXES ?= 1,6
 error:
 	@echo ">>> Running function calling tool with simulated failures on"
 	@echo ">>> prompt(s) #$(INDEXES) (CALL_ME_MAYBE_DEMO_FAIL_INDEXES)..."
-	@echo ">>> Hugging Face cache: $(HF_CACHE)"
-	@mkdir -p $(HF_CACHE)
 	CALL_ME_MAYBE_DEMO_FAIL_INDEXES="$(INDEXES)" \
-	HF_HOME="$(HF_CACHE)" $(UV) run python -m $(SRC) \
+	$(UV) run python -m $(SRC) \
 		--functions_definition $(DEFINITION) \
 		--input $(CALLING) \
 		--output $(OUTPUT) \
@@ -68,9 +66,7 @@ error:
 
 debug:
 	@echo ">>> Running function calling tool in debug mode..."
-	@echo ">>> Hugging Face cache: $(HF_CACHE)"
-	@mkdir -p $(HF_CACHE)
-	HF_HOME="$(HF_CACHE)" $(UV) run python -m pdb -m $(SRC) \
+	$(UV) run python -m pdb -m $(SRC) \
 		--functions_definition $(DEFINITION) \
 		--input $(CALLING) \
 		--output $(OUTPUT)
@@ -114,7 +110,8 @@ help:
 	@echo ""
 	@echo "  Targets:"
 	@echo "    install      Install project dependencies via uv sync"
-	@echo "    run          Run the function calling tool"
+	@echo "    run          Run the function calling tool (default model)"
+	@echo "    run-model    Run with a specific model (e.g., make run-model MODEL='Qwen/Qwen2.5-0.5B')"
 	@echo "    run-verbose  Run the tool printing a live generation trace (--verbose)"
 	@echo "    run-trace    Run the tool saving the generation trace to data/output/trace.json"
 	@echo "    error        Run the tool forcing simulated failures (default: prompts #1,#6;"
@@ -126,4 +123,4 @@ help:
 	@echo "    lint-strict  Run flake8 + mypy with --strict"
 	@echo ""
 
-.PHONY: all install run run-verbose run-trace error debug clean fclean lint lint-strict help
+.PHONY: all install run run-model run-verbose run-trace error debug clean fclean lint lint-strict help

@@ -70,6 +70,7 @@ uv run python -m src \
 |---------------|-----------------------------------------------------------|
 | `install`     | Install dependencies via `uv sync`                        |
 | `run`         | Run the tool with the default input/output paths          |
+| `run-model`   | Run with a specific model (e.g. `make run-model MODEL="HuggingFaceTB/SmolLM2-360M"`) |
 | `run-verbose` | Run the tool printing a live generation trace (`--verbose`) |
 | `run-trace`   | Run the tool saving the generation trace to `data/output/trace.json` |
 | `error`       | Run the tool forcing simulated failures on specific prompts (override with `make error INDEXES=3,7`), to demo error recovery |
@@ -115,7 +116,12 @@ The pipeline for a single prompt is:
      bias" toward the closing quote, and n-gram degeneration detection keep
      the value from looping or running on indefinitely. Trailing words that
      just echo the parameter's own name (e.g. avoid `"hello string"` for a
-     parameter literally called `string`) are trimmed at the end.
+     parameter literally called `string`) are trimmed at the end. As a
+     safety net, if the generation loop exhausts its step budget without
+     ever selecting a stop token through any of the above mechanisms, the
+     closing quote is appended explicitly (the `for`/`else` fallback), so
+     the produced JSON is guaranteed to stay valid even in that
+     theoretical edge case.
    - **`number` / `integer`** (`_generate_number_parameter`): only digits,
      `.`, `-`, and the JSON delimiters that may legally follow a number
      (`,` or `}`) are allowed at each step. The accumulated digits are then
@@ -149,7 +155,11 @@ the result parses.
   text for string parameters would be unreliable. Anchoring every candidate
   token to a valid continuation of a substring of the prompt turns the task
   into extraction rather than generation, which small models are much
-  better at.
+  better at. The one deliberate exception is parameters whose name
+  suggests a regex/pattern field, where a small fixed keyword→regex lookup
+  is checked first (see "Challenges Faced" below), since valid regex
+  syntax for common character classes never appears verbatim in the
+  prompt text.
 - **Only the public `llm_sdk` interface is used**
   (`encode`, `decode`, `get_logits_from_input_ids`) — no private attributes
   or methods of the SDK are accessed, as required by the subject.
@@ -194,6 +204,25 @@ the result parses.
   produces raw digit sequences. The final string is inspected for a decimal
   point (or the declared type is checked) before casting, ensuring the
   Python type matches what the schema promises.
+  **Regex-pattern parameters can't be purely extractive.** The general
+  string generator (`_generate_string_parameter`) only allows tokens that
+  keep the value an exact substring of the prompt — by design, to stop the
+  model from hallucinating text that isn't there. That works well for
+  literal targets (e.g. extracting `"cat"` out of *"substitute 'cat' with
+  'dog'"*), but it structurally cannot produce syntax like `[.,!?;:]` or
+  `[a-zA-Z]`, since those characters never appear verbatim in a prompt like
+  *"replace all alphabetic characters with numbers"* — the extractor would instead grab
+  the literal word "vowels" (or, worse, a long run of prompt text if no
+  short substring closes the value, as seen initially with a "numbers"
+  prompt). This was fixed with a small, opt-in keyword lookup
+  (`_generate_regex_parameter` + `REGEX_KEYWORD_MAP`), used only for
+  parameters whose *name* suggests a regex/pattern field: common
+  character-class words appearing in the prompt (`vowels`, `numbers`,
+  `digits`, `whitespace`, `punctuation`, etc.) are mapped to their
+  standard regex equivalent and injected directly; when no known keyword
+  is found, generation falls back to the normal extractive path
+  unchanged, so literal-word cases like `"cat"` keep working exactly as
+  before.
 
 ## Testing Strategy
 
@@ -209,6 +238,14 @@ the result parses.
   (e.g. `"Hello 34 I'm 233 years old"`), prompts requiring exact substring
   extraction with punctuation, and missing/malformed input files (to confirm
   graceful error handling instead of crashes).
+- Failure-path verification: `make error INDEXES=<n>` was used to force
+  simulated failures on specific prompts and confirm that (1) the run still
+  completes and saves output for every prompt, (2) the failed prompt's
+  entry falls back to the first declared function with type-correct
+  default parameters (not an empty `name`/`parameters`), and (3) every
+  entry in the resulting file — failed or not — still validates against
+  `FunctionCallOutput` (see the "Advanced error recovery mechanisms"
+  section below for the exact commands).
 
 ## Example Usage
 
@@ -250,6 +287,33 @@ Resulting `data/output/function_calling_results.json` excerpt:
 The following bonus features from the subject's "Bonus Part" chapter are
 implemented and working:
 
+### Support for multiple LLM models beyond Qwen/Qwen3-0.6B
+
+The constrained decoding pipeline is fully decoupled from any single 
+hardcoded language model. Through the `--model` CLI option (or the 
+`make run-model` target), the program accepts any compatible Hugging Face 
+model ID or local directory path:
+
+```sh
+# Run with an alternative lightweight model
+make run-model MODEL="HuggingFaceTB/SmolLM2-360M"
+```
+
+Because ConstrainedGenerator and VocabFilter interact strictly through 
+abstract token-level operations (encode, decode, and get_logits_from_input_ids), 
+the entire constrained decoding engine — vocabulary classification, logit 
+masking, schema locking, and string parameter extraction — works across 
+different causal language models without requiring any code modifications.
+
+When the --model argument is omitted, the program defaults to Qwen/Qwen3-0.6B,
+maintaining 100% backward compatibility with the subject's default requirements.
+
+Examples of models to test:
+- **HuggingFaceTB/SmolLM2-360M**
+- **HuggingFaceTB/SmolLM2-1.7B**
+- **Qwen/Qwen2.5-1.5B**
+- **Qwen/Qwen2.5-0.5B**
+
 ### Visualization of the generation process
 
 Two opt-in CLI flags expose the constrained decoding process step by step,
@@ -290,6 +354,35 @@ candidate token sequences that the mask is built from (function names in
 `_generate_boolean_parameter`). Running `make run-verbose` on a single
 prompt makes this encode → mask → select → decode loop directly observable.
 
+### Performance optimizations (Vocabulary Caching)
+
+The project implements a performance optimization through vocabulary
+caching (`VocabFilter`). Since constrained decoding requires evaluating
+which tokens are allowed at every single generation step, calling
+`llm.decode` repeatedly on the entire vocabulary inside the inner
+generation loop would create a significant bottleneck.
+
+To avoid this, `VocabFilter` pre-processes the model's vocabulary exactly
+once during initialization, decoding every token and partitioning the
+result into pre-computed sets: `numeric_tokens` (tokens made up only of
+digits, `.`, `-`, or spaces), `all_tokens` (the full vocabulary, used as
+the unconstrained baseline), and the encoded IDs for the three fixed
+JSON structural characters the generator needs to inject or detect —
+the closing quote (`stop_quote_ids`), comma (`comma_ids`), and closing
+brace (`brace_ids`).
+
+During token-by-token generation, `ConstrainedGenerator` reuses these
+pre-cached sets directly (membership checks and set operations) instead
+of re-decoding tokens on every step, keeping the per-step inference cost
+low and CPU-friendly.
+
+*(Note: true batched inference across multiple prompts at once was not
+implemented. The `llm_sdk`'s public interface, `get_logits_from_input_ids`,
+only accepts a single sequence per call — it does not expose a batched
+variant. Prompts are therefore processed sequentially, which keeps the
+implementation strictly within the SDK's public surface, as required by
+the project rules.)*
+
 ### Advanced error recovery mechanisms
 
 Each prompt is now processed in its own isolated `try/except` block inside
@@ -300,16 +393,29 @@ and the loop **continues** with the remaining prompts rather than aborting
 the whole run. At the end, the summary line reports how many prompts
 succeeded (e.g. `8/11 prompt(s) succeeded`).
 
-Crucially, a failed prompt still gets **an entry in the output list** — a
-placeholder with the original `prompt` and empty `name`/`parameters` —
+Crucially, a failed prompt still gets **an entry in the output list** —
+a schema-compliant placeholder, built by `_build_failure_placeholder` —
 instead of being skipped outright. This matters because the output is a
-JSON *array*, and any position-based consumer relies on
-that array staying the same length and order as the input prompts. Silently
-dropping a failed slot would shift every *subsequent* result one position
-to the left, turning one real failure into a cascade of false failures for
-every prompt after it — the opposite of graceful degradation. Keeping the
-slot (even if empty) means only the genuinely failed prompt(s) fail
-grading; everything before and after stays correctly aligned and unaffected.
+JSON *array*, and any position-based consumer relies on that array staying
+the same length and order as the input prompts. Silently dropping a failed
+slot would shift every *subsequent* result one position to the left,
+turning one real failure into a cascade of false failures for every prompt
+after it — the opposite of graceful degradation. Keeping the slot means
+only the genuinely failed prompt(s) fail grading; everything before and
+after stays correctly aligned and unaffected.
+
+The placeholder itself is deliberately **schema-compliant, not empty**:
+it falls back to the first function declared in `functions_definition.json`
+and fills every one of its parameters with a type-appropriate default
+(`""` for `string`, `0.0` for `number`, `0` for `integer`, `False` for
+`boolean`), rather than emitting `name: ""` / `parameters: {}`. This keeps
+every entry in the output — failed or not — matching a real function's
+schema exactly (correct keys, correct types), satisfying "all required
+arguments must be present and match the defined schema" even in the
+failure path. The failure is still fully visible in `stderr` and in the
+generation trace (`--trace-output`); only the JSON output itself is kept
+schema-valid.
+
 This intentionally does **not** write any extra output file, so the
 program's default output stays exactly the single JSON file required by
 the subject.
@@ -344,12 +450,14 @@ make error INDEXES=3,7
 
 AI assistance (Claude by Anthropic and Gemini by Google) was used during this project for:
 
-- Guidance on project structure and file organization.
+- Guidance on project structure and file organization.s
 - Code review for conformance with the project specification.
-- Reviewing the implementation (`generator.py`, `schemas.py`, `io_utils.py`,
+- Reviewing the implementation (`generator.py`, `regex_patterns.py`, 
+  `parameter_decoders.py`, `trace_logger.py` `schemas.py`, `io_utils.py`,
   `cli.py`, `vocab.py`, `__main__.py`) against the subject to identify gaps
 - Review of type hints and mypy compliance.
-- Improving docstrings across `generator.py`, `schemas.py`, `io_utils.py`,
+- Improving docstrings across `generator.py`, `regex_patterns.py`, 
+  `parameter_decoders.py`, `trace_logger.py` `schemas.py`, `io_utils.py`,
   `cli.py`, `vocab.py`, `__main__.py`, and the `llm_sdk.pyi`, to comply
   with the PEP 257 documentation requirement.
 
